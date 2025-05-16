@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
+const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 
 const client = new Client({
@@ -43,37 +43,26 @@ function rollReward() {
   return 'Nic 😢 / Nothing 😢';
 }
 
-async function postCode(channel) {
+async function postCode() {
   const code = generateCode();
   activeCodes[code] = null;
   saveCodes();
 
-  try {
-    await channel.send(
+  const channel = await client.channels.fetch(process.env.CODES_CHANNEL_ID);
+  if (channel) {
+    channel.send(
       `🎁 **Nowy kod promocyjny:** \`${code}\`  |  🎁 **New promo code:** \`${code}\`\n` +
       `Kto pierwszy, ten lepszy! / First come, first served!`
     );
-  } catch (err) {
-    console.error('Błąd wysyłania kodu:', err);
   }
 }
 
-client.once('ready', async () => {
+client.once('ready', () => {
   console.log(`Zalogowano jako ${client.user.tag}`);
   loadCodes();
 
-  try {
-    const channel = await client.channels.fetch(process.env.CODES_CHANNEL_ID);
-    if (!channel) {
-      console.error('Nie znaleziono kanału z kodami!');
-      return;
-    }
-
-    postCode(channel);
-    setInterval(() => postCode(channel), CODE_INTERVAL);
-  } catch (error) {
-    console.error('Błąd podczas pobierania kanału z kodami:', error);
-  }
+  postCode();
+  setInterval(postCode, CODE_INTERVAL);
 });
 
 client.on('messageCreate', async (message) => {
@@ -85,47 +74,61 @@ client.on('messageCreate', async (message) => {
 
   // Komenda !help / !pomoc
   if (contentLower === '!help' || contentLower === '!pomoc') {
-    const helpMessage = 
-`📜 **Dostępne komendy / Available commands:**
-
-**!kod / !code** — Wygeneruj nowy kod promocyjny / Generate a new promo code  
-**!say [tekst]** — Bot powtórzy tekst (tylko admin) / Bot repeats the text (admin only)  
-**!help / !pomoc** — Wyświetl tę pomoc / Show this help message`;
-
-    return message.channel.send(helpMessage);
-  }
-
-  // Komenda !kod lub !code - generuje i wysyła kod natychmiast
-  if (contentLower === '!kod' || contentLower === '!code') {
-    // Sprawdź uprawnienia jeśli chcesz, np. admin tylko
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return message.reply('🚫 Nie masz uprawnień do generowania kodów. / You do not have permission to generate codes.');
-    }
-
-    const code = generateCode();
-    activeCodes[code] = null;
-    saveCodes();
-
     message.channel.send(
-      `🎁 **Nowy kod promocyjny:** \`${code}\`  |  🎁 **New promo code:** \`${code}\`\n` +
-      `Kto pierwszy, ten lepszy! / First come, first served!`
+      `**Dostępne komendy:**\n` +
+      `!kod lub !code - otrzymujesz aktualny kod promocyjny (jeśli jest)\n` +
+      `!say [tekst] - bot powtórzy Twój tekst\n` +
+      `!ping - sprawdź latencję bota\n` +
+      `!remindme [czas w minutach] [tekst] - przypomnienie w prywatnej wiadomości\n\n` +
+      `**Available commands:**\n` +
+      `!kod or !code - get the current promo code (if any)\n` +
+      `!say [text] - bot repeats your text\n` +
+      `!ping - check bot latency\n` +
+      `!remindme [minutes] [text] - reminder via DM\n`
     );
     return;
   }
 
-  // Komenda !say [tekst]
-  if (contentLower.startsWith('!say ')) {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return message.reply('🚫 Nie masz uprawnień do używania tej komendy. / You do not have permission to use this command.');
-    }
-    const sayMessage = content.slice(5).trim();
-    if (!sayMessage) {
-      return message.reply('Proszę podać tekst do powtórzenia. / Please provide text to say.');
-    }
-    return message.channel.send(sayMessage);
+  // Komenda !ping
+  if (contentLower === '!ping') {
+    const sent = await message.channel.send('Pinging...');
+    sent.edit(`Pong! 🏓 Latencja: ${sent.createdTimestamp - message.createdTimestamp} ms`);
+    return;
   }
 
-  // Obsługa wpisania kodu promocyjnego
+  // Komenda !remindme [czas w minutach] [tekst]
+  if (contentLower.startsWith('!remindme ')) {
+    const args = content.split(' ');
+    if (args.length < 3) {
+      return message.reply('Użycie: !remindme [czas w minutach] [tekst]\nExample: !remindme 5 Przypomnienie o spotkaniu');
+    }
+
+    const time = parseInt(args[1], 10);
+    if (isNaN(time) || time <= 0) {
+      return message.reply('Podaj poprawny czas w minutach większy niż 0.');
+    }
+
+    const reminderText = args.slice(2).join(' ');
+    message.reply(`Ok! Przypomnę Ci o tym za ${time} minut.`);
+
+    setTimeout(() => {
+      message.author.send(`⏰ Przypomnienie: ${reminderText}`).catch(() => {
+        message.channel.send(`<@${message.author.id}>, nie mogę wysłać Ci wiadomości prywatnej. Sprawdź ustawienia prywatności.`);
+      });
+    }, time * 60 * 1000);
+
+    return;
+  }
+
+  // Komenda !say
+  if (contentLower.startsWith('!say ')) {
+    const sayText = content.slice(5).trim();
+    if (!sayText) return message.reply('Podaj tekst do powtórzenia / Please provide text to say.');
+    message.channel.send(sayText);
+    return;
+  }
+
+  // Obsługa kodów promocyjnych (wpisanie kodu)
   if (activeCodes.hasOwnProperty(contentUpper) && activeCodes[contentUpper] === null) {
     const reward = rollReward();
 
@@ -136,19 +139,15 @@ client.on('messageCreate', async (message) => {
     };
     saveCodes();
 
-    try {
-      const notifyChannel = await client.channels.fetch(process.env.NOTIFY_CHANNEL_ID);
-      if (notifyChannel) {
-        notifyChannel.send(
-          `🎉 Użytkownik <@${message.author.id}> użył kodu \`${contentUpper}\` i otrzymał: **${reward}**\n` +
-          `🎉 User <@${message.author.id}> used code \`${contentUpper}\` and got: **${reward}**`
-        );
-      }
-    } catch (err) {
-      console.error('Błąd wysyłania powiadomienia:', err);
+    const notifyChannel = await client.channels.fetch(process.env.NOTIFY_CHANNEL_ID);
+    if (notifyChannel) {
+      notifyChannel.send(
+        `🎉 Użytkownik <@${message.author.id}> użył kodu \`${contentUpper}\` i otrzymał: **${reward}**\n` +
+        `🎉 User <@${message.author.id}> used code \`${contentUpper}\` and got: **${reward}**`
+      );
     }
 
-    return message.reply(
+    message.reply(
       `✅ Gratulacje! Otrzymujesz: **${reward}**\n` +
       `✅ Congratulations! You received: **${reward}**`
     );
