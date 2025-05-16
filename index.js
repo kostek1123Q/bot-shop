@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const fs = require('fs');
 
 const client = new Client({
@@ -43,52 +43,79 @@ function rollReward() {
   return 'Nic 😢 / Nothing 😢';
 }
 
-async function postCode() {
+async function postCode(channel) {
   const code = generateCode();
   activeCodes[code] = null;
   saveCodes();
 
-  const channel = await client.channels.fetch(process.env.CODES_CHANNEL_ID);
-  if (channel) {
-    channel.send(
+  try {
+    await channel.send(
       `🎁 **Nowy kod promocyjny:** \`${code}\`  |  🎁 **New promo code:** \`${code}\`\n` +
       `Kto pierwszy, ten lepszy! / First come, first served!`
     );
+  } catch (err) {
+    console.error('Błąd wysyłania kodu:', err);
   }
 }
 
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`Zalogowano jako ${client.user.tag}`);
   loadCodes();
 
-  postCode();
-  setInterval(postCode, CODE_INTERVAL);
+  try {
+    const channel = await client.channels.fetch(process.env.CODES_CHANNEL_ID);
+    if (!channel) {
+      console.error('Nie znaleziono kanału z kodami!');
+      return;
+    }
+
+    postCode(channel);
+    setInterval(() => postCode(channel), CODE_INTERVAL);
+  } catch (error) {
+    console.error('Błąd podczas pobierania kanału z kodami:', error);
+  }
 });
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   const content = message.content.trim();
+  const contentLower = content.toLowerCase();
   const contentUpper = content.toUpperCase();
 
-  // Komenda !help / !pomoc — lista komend
-  if (content.toLowerCase() === '!help' || content.toLowerCase() === '!pomoc') {
+  // Komenda !help / !pomoc
+  if (contentLower === '!help' || contentLower === '!pomoc') {
     const helpMessage = 
 `📜 **Dostępne komendy / Available commands:**
 
 **!kod / !code** — Wygeneruj nowy kod promocyjny / Generate a new promo code  
 **!say [tekst]** — Bot powtórzy tekst (tylko admin) / Bot repeats the text (admin only)  
-**!ping** — Sprawdź ping bota / Check the bot's ping  
-**!userinfo @user** — Informacje o użytkowniku / User information  
-**!remindme [minuty] [tekst]** — Ustaw przypomnienie / Set a reminder  
 **!help / !pomoc** — Wyświetl tę pomoc / Show this help message`;
 
     return message.channel.send(helpMessage);
   }
 
-  // Komenda !say — bot powtarza tekst, tylko admin
-  if (content.toLowerCase().startsWith('!say ')) {
-    if (!message.member.permissions.has('Administrator')) {
+  // Komenda !kod lub !code - generuje i wysyła kod natychmiast
+  if (contentLower === '!kod' || contentLower === '!code') {
+    // Sprawdź uprawnienia jeśli chcesz, np. admin tylko
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      return message.reply('🚫 Nie masz uprawnień do generowania kodów. / You do not have permission to generate codes.');
+    }
+
+    const code = generateCode();
+    activeCodes[code] = null;
+    saveCodes();
+
+    message.channel.send(
+      `🎁 **Nowy kod promocyjny:** \`${code}\`  |  🎁 **New promo code:** \`${code}\`\n` +
+      `Kto pierwszy, ten lepszy! / First come, first served!`
+    );
+    return;
+  }
+
+  // Komenda !say [tekst]
+  if (contentLower.startsWith('!say ')) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
       return message.reply('🚫 Nie masz uprawnień do używania tej komendy. / You do not have permission to use this command.');
     }
     const sayMessage = content.slice(5).trim();
@@ -98,7 +125,7 @@ client.on('messageCreate', async (message) => {
     return message.channel.send(sayMessage);
   }
 
-  // Obsługa kodów promocyjnych
+  // Obsługa wpisania kodu promocyjnego
   if (activeCodes.hasOwnProperty(contentUpper) && activeCodes[contentUpper] === null) {
     const reward = rollReward();
 
@@ -109,12 +136,16 @@ client.on('messageCreate', async (message) => {
     };
     saveCodes();
 
-    const notifyChannel = await client.channels.fetch(process.env.NOTIFY_CHANNEL_ID);
-    if (notifyChannel) {
-      notifyChannel.send(
-        `🎉 Użytkownik <@${message.author.id}> użył kodu \`${contentUpper}\` i otrzymał: **${reward}**\n` +
-        `🎉 User <@${message.author.id}> used code \`${contentUpper}\` and got: **${reward}**`
-      );
+    try {
+      const notifyChannel = await client.channels.fetch(process.env.NOTIFY_CHANNEL_ID);
+      if (notifyChannel) {
+        notifyChannel.send(
+          `🎉 Użytkownik <@${message.author.id}> użył kodu \`${contentUpper}\` i otrzymał: **${reward}**\n` +
+          `🎉 User <@${message.author.id}> used code \`${contentUpper}\` and got: **${reward}**`
+        );
+      }
+    } catch (err) {
+      console.error('Błąd wysyłania powiadomienia:', err);
     }
 
     return message.reply(
