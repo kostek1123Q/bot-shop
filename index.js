@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const fs = require('fs');
 
 const client = new Client({
@@ -10,28 +10,18 @@ const client = new Client({
   ]
 });
 
+const PREFIX = '!';
 const CODE_LENGTH = 8;
-const CODE_INTERVAL = 15 * 60 * 1000; // 15 minut
-
 let activeCodes = {};
-
-function generateCode(length = CODE_LENGTH) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let code = '';
-  for (let i = 0; i < length; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
-
-function saveCodes() {
-  fs.writeFileSync('codes.json', JSON.stringify(activeCodes, null, 2));
-}
 
 function loadCodes() {
   if (fs.existsSync('codes.json')) {
     activeCodes = JSON.parse(fs.readFileSync('codes.json', 'utf8'));
   }
+}
+
+function saveCodes() {
+  fs.writeFileSync('codes.json', JSON.stringify(activeCodes, null, 2));
 }
 
 function rollReward() {
@@ -43,96 +33,31 @@ function rollReward() {
   return 'Nic 😢 / Nothing 😢';
 }
 
-async function postCode() {
-  const code = generateCode();
-  activeCodes[code] = null;
-  saveCodes();
-
-  const channel = await client.channels.fetch(process.env.CODES_CHANNEL_ID);
-  if (channel) {
-    channel.send(
-      `🎁 **Nowy kod promocyjny:** \`${code}\`  |  🎁 **New promo code:** \`${code}\`\n` +
-      `Kto pierwszy, ten lepszy! / First come, first served!`
-    );
-  }
-}
-
 client.once('ready', () => {
-  console.log(`Zalogowano jako ${client.user.tag}`);
+  console.log(`✅ Zalogowano jako ${client.user.tag}`);
   loadCodes();
-
-  postCode();
-  setInterval(postCode, CODE_INTERVAL);
 });
 
 client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
+  if (message.author.bot || !message.content.startsWith(PREFIX)) return;
 
-  const content = message.content.trim();
-  const contentLower = content.toLowerCase();
-  const contentUpper = content.toUpperCase();
+  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const command = args.shift().toLowerCase();
+  const content = message.content.trim().toUpperCase();
 
-  // Komenda !help / !pomoc
-  if (contentLower === '!help' || contentLower === '!pomoc') {
-    message.channel.send(
-      `**Dostępne komendy:**\n` +
-      `!kod lub !code - otrzymujesz aktualny kod promocyjny (jeśli jest)\n` +
-      `!say [tekst] - bot powtórzy Twój tekst\n` +
-      `!ping - sprawdź latencję bota\n` +
-      `!remindme [czas w minutach] [tekst] - przypomnienie w prywatnej wiadomości\n\n` +
-      `**Available commands:**\n` +
-      `!kod or !code - get the current promo code (if any)\n` +
-      `!say [text] - bot repeats your text\n` +
-      `!ping - check bot latency\n` +
-      `!remindme [minutes] [text] - reminder via DM\n`
-    );
-    return;
-  }
-
-  // Komenda !ping
-  if (contentLower === '!ping') {
-    const sent = await message.channel.send('Pinging...');
-    sent.edit(`Pong! 🏓 Latencja: ${sent.createdTimestamp - message.createdTimestamp} ms`);
-    return;
-  }
-
-  // Komenda !remindme [czas w minutach] [tekst]
-  if (contentLower.startsWith('!remindme ')) {
-    const args = content.split(' ');
-    if (args.length < 3) {
-      return message.reply('Użycie: !remindme [czas w minutach] [tekst]\nExample: !remindme 5 Przypomnienie o spotkaniu');
+  // !code
+  if (command === 'code') {
+    const userCode = args[0]?.toUpperCase();
+    if (!userCode || !activeCodes.hasOwnProperty(userCode)) {
+      return message.reply('❌ Nieprawidłowy kod / Invalid code.');
     }
 
-    const time = parseInt(args[1], 10);
-    if (isNaN(time) || time <= 0) {
-      return message.reply('Podaj poprawny czas w minutach większy niż 0.');
+    if (activeCodes[userCode] !== null) {
+      return message.reply('❌ Ten kod został już użyty / This code has already been used.');
     }
 
-    const reminderText = args.slice(2).join(' ');
-    message.reply(`Ok! Przypomnę Ci o tym za ${time} minut.`);
-
-    setTimeout(() => {
-      message.author.send(`⏰ Przypomnienie: ${reminderText}`).catch(() => {
-        message.channel.send(`<@${message.author.id}>, nie mogę wysłać Ci wiadomości prywatnej. Sprawdź ustawienia prywatności.`);
-      });
-    }, time * 60 * 1000);
-
-    return;
-  }
-
-  // Komenda !say
-  if (contentLower.startsWith('!say ')) {
-    const sayText = content.slice(5).trim();
-    if (!sayText) return message.reply('Podaj tekst do powtórzenia / Please provide text to say.');
-    message.channel.send(sayText);
-    return;
-  }
-
-  // Obsługa kodów promocyjnych (wpisanie kodu)
-  if (activeCodes.hasOwnProperty(contentUpper) && activeCodes[contentUpper] === null) {
     const reward = rollReward();
-
-    activeCodes[contentUpper] = {
+    activeCodes[userCode] = {
       user: message.author.id,
       reward: reward,
       timestamp: Date.now()
@@ -142,15 +67,89 @@ client.on('messageCreate', async (message) => {
     const notifyChannel = await client.channels.fetch(process.env.NOTIFY_CHANNEL_ID);
     if (notifyChannel) {
       notifyChannel.send(
-        `🎉 Użytkownik <@${message.author.id}> użył kodu \`${contentUpper}\` i otrzymał: **${reward}**\n` +
-        `🎉 User <@${message.author.id}> used code \`${contentUpper}\` and got: **${reward}**`
+        `🎉 <@${message.author.id}> użył kodu \`${userCode}\` i otrzymał: **${reward}**`
       );
     }
 
-    message.reply(
-      `✅ Gratulacje! Otrzymujesz: **${reward}**\n` +
-      `✅ Congratulations! You received: **${reward}**`
+    return message.reply(
+      `✅ Gratulacje! Otrzymujesz: **${reward}**\n✅ Congratulations! You received: **${reward}**`
     );
+  }
+
+  // !say
+  if (command === 'say') {
+    const msg = args.join(' ');
+    if (!msg) return message.reply('❌ Podaj wiadomość / Please provide a message.');
+    return message.channel.send(msg);
+  }
+
+  // !ping
+  if (command === 'ping') {
+    return message.reply('🏓 Pong!');
+  }
+
+  // !remindme
+  if (command === 'remindme') {
+    const time = parseInt(args[0]) * 1000;
+    const reminder = args.slice(1).join(' ');
+    if (isNaN(time) || !reminder) {
+      return message.reply('❌ Użycie: `!remindme <sekundy> <wiadomość>`');
+    }
+    message.reply(`⏰ Przypomnienie ustawione na ${args[0]} sekund.`);
+    setTimeout(() => {
+      message.author.send(`🔔 Przypomnienie: ${reminder}`);
+    }, time);
+  }
+
+  // !help
+  if (command === 'help' || command === 'pomoc') {
+    return message.reply(
+      `📜 **Dostępne komendy / Available commands**:\n` +
+      `• \`!code <kod>\` – Użyj kodu / Use a code\n` +
+      `• \`!say <wiadomość>\` – Bot powtórzy wiadomość / Bot repeats message\n` +
+      `• \`!ping\` – Sprawdź opóźnienie / Check latency\n` +
+      `• \`!remindme <sekundy> <wiadomość>\` – Przypomnienie / Reminder\n` +
+      `• \`!help\` – Lista komend / Command list\n` +
+      `• \`!adminhelp\` – Komendy administratora / Admin commands`
+    );
+  }
+
+  // !adminhelp
+  if (command === 'adminhelp') {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      return message.reply('❌ Ta komenda jest tylko dla administratorów. / This command is admin-only.');
+    }
+
+    return message.reply(
+      `🛠️ **Komendy administratora / Admin Commands**:\n` +
+      `• \`!addcode <KOD>\` – Dodaj kod ręcznie / Add code manually\n` +
+      `• \`!resetcodes\` – Usuń wszystkie kody / Delete all codes\n` +
+      `• \`!codesused\` – Liczba użytych kodów / Used code count`
+    );
+  }
+
+  // !addcode
+  if (command === 'addcode') {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+    const newCode = args[0]?.toUpperCase();
+    if (!newCode) return message.reply('❌ Podaj kod do dodania / Provide a code to add.');
+    activeCodes[newCode] = null;
+    saveCodes();
+    return message.reply(`✅ Kod \`${newCode}\` został dodany.`);
+  }
+
+  // !resetcodes
+  if (command === 'resetcodes') {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+    activeCodes = {};
+    saveCodes();
+    return message.reply('✅ Wszystkie kody zostały zresetowane.');
+  }
+
+  // !codesused
+  if (command === 'codesused') {
+    const used = Object.values(activeCodes).filter(v => v !== null).length;
+    return message.reply(`📊 Liczba użytych kodów: ${used}`);
   }
 });
 
