@@ -69,24 +69,40 @@ client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   const content = message.content.trim();
+  const contentUpper = content.toUpperCase();
 
-  // Komenda !say
-  if (content.toLowerCase().startsWith('!say ')) {
-    const text = content.slice(5).trim(); // wyciągamy wszystko po "!say "
-    if (!text) {
-      message.reply('Musisz podać tekst do powtórzenia! / You must provide text to repeat!');
-      return;
-    }
-    message.channel.send(text);
-    return;
+  // Komenda !help / !pomoc — lista komend
+  if (content.toLowerCase() === '!help' || content.toLowerCase() === '!pomoc') {
+    const helpMessage = 
+`📜 **Dostępne komendy / Available commands:**
+
+**!kod / !code** — Wygeneruj nowy kod promocyjny / Generate a new promo code  
+**!say [tekst]** — Bot powtórzy tekst (tylko admin) / Bot repeats the text (admin only)  
+**!ping** — Sprawdź ping bota / Check the bot's ping  
+**!userinfo @user** — Informacje o użytkowniku / User information  
+**!remindme [minuty] [tekst]** — Ustaw przypomnienie / Set a reminder  
+**!help / !pomoc** — Wyświetl tę pomoc / Show this help message`;
+
+    return message.channel.send(helpMessage);
   }
 
-  const upperContent = content.toUpperCase();
+  // Komenda !say — bot powtarza tekst, tylko admin
+  if (content.toLowerCase().startsWith('!say ')) {
+    if (!message.member.permissions.has('Administrator')) {
+      return message.reply('🚫 Nie masz uprawnień do używania tej komendy. / You do not have permission to use this command.');
+    }
+    const sayMessage = content.slice(5).trim();
+    if (!sayMessage) {
+      return message.reply('Proszę podać tekst do powtórzenia. / Please provide text to say.');
+    }
+    return message.channel.send(sayMessage);
+  }
 
-  if (activeCodes.hasOwnProperty(upperContent) && activeCodes[upperContent] === null) {
+  // Obsługa kodów promocyjnych
+  if (activeCodes.hasOwnProperty(contentUpper) && activeCodes[contentUpper] === null) {
     const reward = rollReward();
 
-    activeCodes[upperContent] = {
+    activeCodes[contentUpper] = {
       user: message.author.id,
       reward: reward,
       timestamp: Date.now()
@@ -96,12 +112,12 @@ client.on('messageCreate', async (message) => {
     const notifyChannel = await client.channels.fetch(process.env.NOTIFY_CHANNEL_ID);
     if (notifyChannel) {
       notifyChannel.send(
-        `🎉 Użytkownik <@${message.author.id}> użył kodu \`${upperContent}\` i otrzymał: **${reward}**\n` +
-        `🎉 User <@${message.author.id}> used code \`${upperContent}\` and got: **${reward}**`
+        `🎉 Użytkownik <@${message.author.id}> użył kodu \`${contentUpper}\` i otrzymał: **${reward}**\n` +
+        `🎉 User <@${message.author.id}> used code \`${contentUpper}\` and got: **${reward}**`
       );
     }
 
-    message.reply(
+    return message.reply(
       `✅ Gratulacje! Otrzymujesz: **${reward}**\n` +
       `✅ Congratulations! You received: **${reward}**`
     );
