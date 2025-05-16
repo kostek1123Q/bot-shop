@@ -70,43 +70,41 @@ client.on('messageCreate', async (message) => {
 
   const content = message.content.trim();
 
-  // Obsługa komend !kod i !code
-  if (content.toLowerCase().startsWith('!kod') || content.toLowerCase().startsWith('!code')) {
-    const parts = content.split(' ');
-    if (parts.length < 2) {
-      return message.reply('Proszę podać kod po komendzie, np. `!kod ABC12345` / Please provide the code after the command, e.g. `!code ABC12345`');
+  // Komenda !say
+  if (content.toLowerCase().startsWith('!say ')) {
+    const text = content.slice(5).trim(); // wyciągamy wszystko po "!say "
+    if (!text) {
+      message.reply('Musisz podać tekst do powtórzenia! / You must provide text to repeat!');
+      return;
     }
+    message.channel.send(text);
+    return;
+  }
 
-    const codeEntered = parts[1].toUpperCase();
+  const upperContent = content.toUpperCase();
 
-    if (activeCodes.hasOwnProperty(codeEntered) && activeCodes[codeEntered] === null) {
-      const reward = rollReward();
+  if (activeCodes.hasOwnProperty(upperContent) && activeCodes[upperContent] === null) {
+    const reward = rollReward();
 
-      activeCodes[codeEntered] = {
-        user: message.author.id,
-        reward: reward,
-        timestamp: Date.now()
-      };
-      saveCodes();
+    activeCodes[upperContent] = {
+      user: message.author.id,
+      reward: reward,
+      timestamp: Date.now()
+    };
+    saveCodes();
 
-      const notifyChannel = await client.channels.fetch(process.env.NOTIFY_CHANNEL_ID);
-      if (notifyChannel) {
-        notifyChannel.send(
-          `🎉 Użytkownik <@${message.author.id}> użył kodu \`${codeEntered}\` i otrzymał: **${reward}**\n` +
-          `🎉 User <@${message.author.id}> used code \`${codeEntered}\` and got: **${reward}**`
-        );
-      }
-
-      return message.reply(
-        `✅ Gratulacje! Otrzymujesz: **${reward}**\n` +
-        `✅ Congratulations! You received: **${reward}**`
-      );
-    } else {
-      return message.reply(
-        `❌ Nieprawidłowy lub już wykorzystany kod.\n` +
-        `❌ Invalid or already used code.`
+    const notifyChannel = await client.channels.fetch(process.env.NOTIFY_CHANNEL_ID);
+    if (notifyChannel) {
+      notifyChannel.send(
+        `🎉 Użytkownik <@${message.author.id}> użył kodu \`${upperContent}\` i otrzymał: **${reward}**\n` +
+        `🎉 User <@${message.author.id}> used code \`${upperContent}\` and got: **${reward}**`
       );
     }
+
+    message.reply(
+      `✅ Gratulacje! Otrzymujesz: **${reward}**\n` +
+      `✅ Congratulations! You received: **${reward}**`
+    );
   }
 });
 
